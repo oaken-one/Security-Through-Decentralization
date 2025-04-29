@@ -1,134 +1,84 @@
 /*
- * Local Python Server Model - Dynamic Sensor Update
- * Uses WiFiNINA to connect to Wi-Fi and HTTP client to poll a Flask server.
+ * Arduino IoT Cloud Model - Dynamic Sensor Update
+ * Uses ArduinoIoTCloud to sync a cloud variable 'activeSensor'.
  * MKR WiFi 1010 + MKR ENV Shield. Initially reads temperature.
- * Server should return "temperature", "humidity", or "none" (as plain text).
+ * Changing the 'activeSensor' variable on the IoT Cloud dashboard triggers the device to switch sensors.
  */
 
 #include <WiFiNINA.h>
-#include <Arduino_MKRENV.h>  // Library for the MKR ENV Shield (temperature & humidity sensors)
+#include <Arduino_MKRENV.h>
+#include <ArduinoIoTCloud.h>
+#include <Arduino_ConnectionHandler.h>
 
-// Wi-Fi network credentials (replace with your SSID and password)
+// Wi-Fi network credentials and IoT Cloud info
 const char* WIFI_SSID     = "YourWiFiSSID";
 const char* WIFI_PASSWORD = "YourWiFiPassword";
+const char* THING_ID      = "YOUR_THING_ID";      // Arduino IoT Cloud Thing ID
+const char* DEVICE_LOGIN  = "YOUR_DEVICE_ID";     // Device ID (from IoT Cloud setup)
+const char* DEVICE_KEY    = "YOUR_DEVICE_SECRET"; // Device key from Arduino IoT Cloud
 
-// Server details (replace with your Flask server's address and port)
-const char* SERVER_HOST = "192.168.1.100";  // e.g., local server IP or hostname
-const int   SERVER_PORT = 5000;             // e.g., Flask default port
-const String SERVER_PATH = "/command";      // endpoint path that returns the sensor command
+CloudString activeSensor;         // Cloud variable (READ/WRITE) for active sensor selection
+// (Possible values: "temperature", "humidity", "none")
 
-// Timing intervals (in milliseconds)
-const unsigned long COMMAND_CHECK_INTERVAL = 10000;  // check server every 10 seconds
-const unsigned long SENSOR_READ_INTERVAL   = 5000;   // read sensor every 5 seconds
+const unsigned long SENSOR_READ_INTERVAL = 5000;  // read sensor every 5 seconds
+unsigned long lastSensorRead = 0;
 
-// State variables
-String activeSensor = "temperature";  // default sensor mode
-unsigned long lastCommandCheck = 0;
-unsigned long lastSensorRead   = 0;
+// Forward declaration of callback
+void onActiveSensorChange();
 
-// Functions to read sensors using the MKR ENV Shield
+// Functions to read sensors
 float readTemperature() {
-  // Read temperature in Celsius from the ENV shield
   return ENV.readTemperature();
 }
-
 float readHumidity() {
-  // Read humidity (relative percentage) from the ENV shield
   return ENV.readHumidity();
-}
-
-void connectWiFi() {
-  // Attempt to connect to Wi-Fi network
-  Serial.print("Connecting to WiFi SSID: ");
-  Serial.println(WIFI_SSID);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  // Wait until connected (or timeout after a few attempts)
-  int maxAttempts = 10;
-  while (WiFi.status() != WL_CONNECTED && maxAttempts-- > 0) {
-    delay(1000);
-    Serial.print(".");
-  }
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\nWiFi connected. IP address: " + WiFi.localIP().toString());
-  } else {
-    Serial.println("\nWiFi connection failed!");
-  }
-}
-
-String fetchServerCommand() {
-  // Connect to the Flask server and get the command
-  WiFiClient client;
-  String command = "";
-  if (client.connect(SERVER_HOST, SERVER_PORT)) {
-    // Make HTTP GET request
-    client.print(String("GET ") + SERVER_PATH + " HTTP/1.1\r\n");
-    client.print(String("Host: ") + SERVER_HOST + "\r\n");
-    client.print("Connection: close\r\n\r\n");
-    // Read response
-    bool headersEnded = false;
-    String responseLine;
-    while (client.connected() || client.available()) {
-      if (client.available()) {
-        char c = client.read();
-        if (!headersEnded) {
-          // Look for end of headers (blank line)
-          responseLine += c;
-          if (responseLine.endsWith("\r\n\r\n")) {
-            headersEnded = true;
-          }
-        } else {
-          // Headers are done, read the body (command)
-          command += c;
-        }
-      }
-    }
-    client.stop();
-    // Trim any whitespace/newlines from the command
-    command.trim();
-  } else {
-    Serial.println("Error: Could not connect to server");
-  }
-  return command;
 }
 
 void setup() {
   Serial.begin(115200);
-  while (!Serial) ; // wait for serial port to connect (needed for native USB)
+  while (!Serial);  // wait for Serial monitor
   
-  // Initialize the ENV Shield
+  // Initialize ENV Shield sensors
   if (!ENV.begin()) {
     Serial.println("Failed to initialize MKR ENV Shield!");
-    while (1); // halt if sensor shield is not detected
+    while (1);
   }
   
-  // Connect to Wi-Fi network
-  connectWiFi();
+  // Connect to Wi-Fi and Arduino IoT Cloud
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.print("Connecting to WiFi...");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nConnected to WiFi.");
   
-  Serial.println("Starting Local Server Model. Default sensor: temperature.");
+  // Configure Arduino IoT Cloud connection
+  ArduinoCloud.setThingId(THING_ID);
+  ArduinoCloud.setDeviceId(DEVICE_LOGIN);
+  ArduinoCloud.setDeviceSecret(DEVICE_KEY);
+  // Set up the WiFi connection to Arduino IoT Cloud
+  WiFiConnectionHandler ArduinoIoTPreferredConnection(WIFI_SSID, WIFI_PASSWORD);
+  
+  // Add cloud variable (activeSensor) with a callback on change
+  ArduinoCloud.addProperty(activeSensor, READWRITE, ON_CHANGE, onActiveSensorChange);
+  
+  // Begin cloud connection
+  ArduinoCloud.begin(ArduinoIoTPreferredConnection);
+  
+  // Set initial value for cloud variable and sync with cloud
+  activeSensor = "temperature";  // default mode
+  ArduinoCloud.update();  // push initial value to cloud
+  
+  Serial.println("Connected to Arduino IoT Cloud. Default sensor: temperature.");
 }
 
 void loop() {
+  // Continuously sync with the IoT Cloud to get any updates
+  ArduinoCloud.update();
+  
+  // Periodically read from the active sensor (based on the current cloud value)
   unsigned long now = millis();
-  
-  // Periodically check with the server for an update command
-  if (now - lastCommandCheck >= COMMAND_CHECK_INTERVAL) {
-    lastCommandCheck = now;
-    String newCommand = fetchServerCommand();
-    if (newCommand.length() > 0) {
-      Serial.println("Server response: " + newCommand);
-      // Only update activeSensor if the command is recognized
-      if (newCommand == "temperature" || newCommand == "humidity" || newCommand == "none") {
-        if (newCommand != activeSensor) {
-          activeSensor = newCommand;
-          Serial.println("Updated active sensor mode to: " + activeSensor);
-        }
-      } else {
-        Serial.println("Warning: Unrecognized command, ignoring.");
-      }
-    }
-  }
-  
-  // Periodically read from the active sensor (if not disabled)
   if (now - lastSensorRead >= SENSOR_READ_INTERVAL) {
     lastSensorRead = now;
     if (activeSensor == "temperature") {
@@ -136,15 +86,21 @@ void loop() {
       Serial.print("Temperature: ");
       Serial.print(t);
       Serial.println(" °C");
-      // (Here you could send the data to a server or cloud if needed)
     } else if (activeSensor == "humidity") {
       float h = readHumidity();
       Serial.print("Humidity: ");
       Serial.print(h);
       Serial.println(" %");
     } else if (activeSensor == "none") {
-      Serial.println("Sensor readings disabled (activeSensor == 'none').");
+      Serial.println("Sensor readings are disabled (activeSensor == 'none').");
     }
-    // If activeSensor has some other unexpected value, do nothing.
+    // (If other values somehow present, ignore them)
   }
+}
+
+// Callback function that is called whenever the cloud variable 'activeSensor' changes
+void onActiveSensorChange() {
+  Serial.print("Cloud update received. New active sensor: ");
+  Serial.println(activeSensor);
+  // (The activeSensor variable is already updated to the new value at this point.)
 }

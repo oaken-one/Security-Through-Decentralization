@@ -7,8 +7,7 @@
 
 #include <WiFiNINA.h>
 #include <Arduino_MKRENV.h>
-// Assume we have a Web3 library for Arduino (e.g., https://github.com/kopanitsa/web3-arduino)
-#include <Web3.h>
+#include Web3.h
 #include <Contract.h>
 
 // Wi-Fi network credentials
