@@ -1,1 +1,1 @@
-# SeniorThesisIoT
+# Security Through Decentralization
