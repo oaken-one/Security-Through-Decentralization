@@ -1,7 +1,6 @@
 # Security Through Decentralization
 
-Summary
-This repository contains all the code that backs the senior-thesis project “Security Through Decentralization: Blockchain’s Role in IoT Networks.” Three alternative firmware-update architectures for a fleet of 10 Arduino MKR WiFi 1010 + MKR ENV Shield sensors were built and benchmarked:
+This repository contains all the code that backs the senior-thesis project “Security Through Decentralization: Blockchain’s Role in IoT Networks”. Three alternative firmware-update architectures for a fleet of 10 Arduino MKR WiFi 1010 + MKR ENV Shield sensors were built and benchmarked:
 
 Local Python Server – classic client–server on a LAN
 
