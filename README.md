@@ -8,5 +8,5 @@ Arduino IoT Cloud – vendor cloud OTA updates
 
 Blockchain-Integrated – private Ethereum PoA ledger + smart-contract-driven updates
 
-The repo also includes Arduino sketches that simulate DDoS and MitM attacks so you can reproduce the security tests.
+The repo also includes Arduino sketches that simulate DDoS and MitM attacks.
 
